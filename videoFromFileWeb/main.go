@@ -4,14 +4,16 @@
 	 "encoding/base64"
 	 "encoding/json"
 	 "fmt"
-	 "github.com/pion/rtcp"
 	 "github.com/pion/webrtc"
+	 "github.com/pion/webrtc/pkg/media"
+	 "github.com/pion/webrtc/pkg/media/ivfreader"
 	 "html/template"
 	 "io"
 	 "io/ioutil"
 	 "log"
 	 "math/rand"
 	 "net/http"
+	 "os"
 	 "sync"
 	 "time"
  )
@@ -32,7 +34,7 @@ func checkNoError(err error) {
 	}
 }
 
-// GetWeb returns web frontend
+// GetWeb returns mirrorweb frontend
 func getWeb(w http.ResponseWriter, r *http.Request) {
 	tmpl, err := template.ParseFiles("demo.html")
 	if err != nil {
@@ -67,7 +69,7 @@ func startWebRTCSession(w http.ResponseWriter, r *http.Request) {
 	buf, err := ioutil.ReadAll(r.Body)
 	checkNoError(err)
 
-	// The web rtc offer is sent over in the body of the request
+	// The mirrorweb rtc offer is sent over in the body of the request
 	offer := webrtc.SessionDescription{}
 	decode(string(buf), &offer)
 
@@ -82,82 +84,69 @@ func startWebRTCSession(w http.ResponseWriter, r *http.Request) {
 	err = mediaEngine.PopulateFromSDP(offer)
 	checkNoError(err)
 
-	videoCodecs := mediaEngine.GetCodecsByKind(webrtc.RTPCodecTypeVideo)
-	if len(videoCodecs) == 0 {
-		panic("Offer contained no video codecs")
+	// Search for VP8 Payload type. If the offer doesn't support VP8 exit since
+	// since they won't be able to decode anything we send them
+	var payloadType uint8
+	for _, videoCodec := range mediaEngine.GetCodecsByKind(webrtc.RTPCodecTypeVideo) {
+		if videoCodec.Name == "VP8" {
+			payloadType = videoCodec.PayloadType
+			break
+		}
+	}
+	if payloadType == 0 {
+		panic("Remote peer does not support VP8")
 	}
 
+	// Create a new RTCPeerConnection
 	api := webrtc.NewAPI(webrtc.WithMediaEngine(mediaEngine))
-
-	// Prepare the configuration
-	config := webrtc.Configuration{
+	peerConnection, err = api.NewPeerConnection(webrtc.Configuration{
 		ICEServers: []webrtc.ICEServer{
 			{
 				URLs: []string{"stun:stun.l.google.com:19302"},
 			},
 		},
-	}
-	// Create a new RTCPeerConnection
-	peerConnection, err = api.NewPeerConnection(config)
+	})
 	checkNoError(err)
 
-	// Set the remote SessionDescription
-	err = peerConnection.SetRemoteDescription(offer)
+	// Create a video track
+	videoTrack, err := peerConnection.NewTrack(payloadType, rand.Uint32(), "video", "pion")
+	checkNoError(err)
+	_, err = peerConnection.AddTrack(videoTrack)
 	checkNoError(err)
 
-	// Create Track that we send video back to browser on
-	outputTrack, err := peerConnection.NewTrack(videoCodecs[0].PayloadType, rand.Uint32(), "video", "pion")
-	checkNoError(err)
+	go func() {
+		// Open a IVF file and start reading using our IVFReader
+		file, ivfErr := os.Open("output.ivf")
+		checkNoError(ivfErr)
 
-	// Add this newly created track to the PeerConnection
-	_, err = peerConnection.AddTrack(outputTrack)
-	checkNoError(err)
+		ivf, header, ivfErr := ivfreader.NewWith(file)
+		checkNoError(ivfErr)
 
-	// Set a handler for when a new remote track starts, this handler copies inbound RTP packets,
-	// replaces the SSRC and sends them back
-	peerConnection.OnTrack(func(track *webrtc.Track, receiver *webrtc.RTPReceiver) {
-		// Send a PLI on an interval so that the publisher is pushing a keyframe every rtcpPLIInterval
-		// This is a temporary fix until we implement incoming RTCP events, then we would push a PLI only when a viewer requests it
-		doneChan := make(chan struct{})
-		go func() {
-			ticker := time.NewTicker(time.Second * 3)
-			loop:
-			for {
-				select {
-					case <- ticker.C:
-						errSend := peerConnection.WriteRTCP([]rtcp.Packet{&rtcp.PictureLossIndication{MediaSSRC: track.SSRC()}})
-						if errSend != nil {
-							fmt.Println(errSend)
-						}
-					case <-doneChan:
-						break loop
-				}
-			}
-		}()
-
-		fmt.Printf("Track has started, of type %d: %s \n", track.PayloadType(), track.Codec().Name)
+		// Send our video file frame at a time. Pace our sending so we send it at the same speed it should be played back as.
+		// This isn't required since the video is timestamped, but we will such much higher loss if we send all at once.
+		sleepTime := time.Millisecond * time.Duration((float32(header.TimebaseNumerator)/float32(header.TimebaseDenominator))*1000)
 		for {
-			// Read RTP packets being sent to Pion
-			rtp, readErr := track.ReadRTP()
-			if readErr == io.EOF {
-				doneChan <- struct{}{}
+			frame, _, ivfErr := ivf.ParseNextFrame()
+			if ivfErr == io.EOF {
 				break
 			}
-			checkNoError(readErr)
+			checkNoError(ivfErr)
 
-			// Replace the SSRC with the SSRC of the outbound track.
-			// The only change we are making replacing the SSRC, the RTP packets are unchanged otherwise
-			rtp.SSRC = outputTrack.SSRC()
-
-			writeErr := outputTrack.WriteRTP(rtp)
-			checkNoError(writeErr)
+			time.Sleep(sleepTime)
+			ivfErr = videoTrack.WriteSample(media.Sample{Data: frame, Samples: 90000})
+			checkNoError(ivfErr)
 		}
-	})
+	}()
+
 	// Set the handler for ICE connection state
 	// This will notify you when the peer has connected/disconnected
 	peerConnection.OnICEConnectionStateChange(func(connectionState webrtc.ICEConnectionState) {
 		fmt.Printf("Connection State has changed %s \n", connectionState.String())
 	})
+
+	// Set the remote SessionDescription
+	err = peerConnection.SetRemoteDescription(offer)
+	checkNoError(err)
 
 	// Create an answer
 	answer, err := peerConnection.CreateAnswer(nil)

@@ -56,7 +56,7 @@ $(document).ready(() => {
       track.stop();
     });
     el.remove();
-    stream.getTracks().forEach(function(track) {
+    el.getTracks().forEach(function(track) {
       track.stop();
     });
     $.post("/webrtc/close").done(success).fail(fail)
