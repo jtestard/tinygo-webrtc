@@ -1,0 +1,23 @@
+<head>
+    <link rel="stylesheet" href="/static/demo.css">
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.4.1/jquery.min.js"></script>
+</head>
+
+Browser base64 Session Description<br />
+<textarea id="localSessionDescription" readonly="true"></textarea> <br />
+<button onclick="window.sendSession()"> Send Session to server </button>  <br />
+
+Golang base64 Session Description<br />
+<textarea id="remoteSessionDescription"></textarea> <br/>
+<button onclick="window.startSession()"> Start Session </button><br />
+<button onclick="window.closeSession()"> Close Session </button>  <br />
+
+<br />
+
+Video<br />
+<div id="remoteVideos"></div> <br />
+
+Logs<br />
+<div id="logs"></div>
+
+<script src="/static/demo.js"></script>
