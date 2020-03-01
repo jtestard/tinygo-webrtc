@@ -3,7 +3,7 @@
 // license that can be found in the LICENSE file.
 
 // Renders a textured spinning cube using GLFW 3 and OpenGL 4.1 core forward-compatible profile.
-package main // import "github.com/go-gl/example/gl41core-cube"
+package main
 
 import (
 	"fmt"
@@ -19,10 +19,11 @@ import (
 	"github.com/go-gl/gl/v4.1-core/gl"
 	"github.com/go-gl/glfw/v3.3/glfw"
 	"github.com/go-gl/mathgl/mgl32"
+	"github.com/hysios/go-ffmpeg-player/player"
 )
 
-const windowWidth = 800
-const windowHeight = 600
+const width = 800
+const height = 600
 
 func init() {
 	// GLFW event handling must run on the main OS thread
@@ -40,7 +41,7 @@ func main() {
 	glfw.WindowHint(glfw.ContextVersionMinor, 1)
 	glfw.WindowHint(glfw.OpenGLProfile, glfw.OpenGLCoreProfile)
 	glfw.WindowHint(glfw.OpenGLForwardCompatible, glfw.True)
-	window, err := glfw.CreateWindow(windowWidth, windowHeight, "Cube", nil, nil)
+	window, err := glfw.CreateWindow(width, height, "Cube", nil, nil)
 	if err != nil {
 		panic(err)
 	}
@@ -62,11 +63,11 @@ func main() {
 
 	gl.UseProgram(program)
 
-	projection := mgl32.Perspective(mgl32.DegToRad(45.0), float32(windowWidth)/windowHeight, 0.1, 10.0)
+	projection := mgl32.Perspective(mgl32.DegToRad(30.0), float32(width)/height, 0.1, 10.0)
 	projectionUniform := gl.GetUniformLocation(program, gl.Str("projection\x00"))
 	gl.UniformMatrix4fv(projectionUniform, 1, false, &projection[0])
 
-	camera := mgl32.LookAtV(mgl32.Vec3{3, 3, 3}, mgl32.Vec3{0, 0, 0}, mgl32.Vec3{0, 1, 0})
+	camera := mgl32.LookAtV(mgl32.Vec3{3, 4, 3}, mgl32.Vec3{1, 1, 1}, mgl32.Vec3{1, 1, 0})
 	cameraUniform := gl.GetUniformLocation(program, gl.Str("camera\x00"))
 	gl.UniformMatrix4fv(cameraUniform, 1, false, &camera[0])
 
@@ -80,10 +81,12 @@ func main() {
 	gl.BindFragDataLocation(program, 0, gl.Str("outputColor\x00"))
 
 	// Load the texture
-	texture, err := newTexture("/Users/julestestard/go/src/github.com/jtestard/tinygo-webrtc/corecube/profile.png")
+	texture, err := newImageTexture("profile.png")
+	// texture, chFrames, err := newVideoTexture("output.ivf")
 	if err != nil {
 		log.Fatalln(err)
 	}
+	programLog(program)
 
 	// Configure the vertex data
 	var vao uint32
@@ -128,8 +131,10 @@ func main() {
 
 		gl.BindVertexArray(vao)
 
+		// _ = chFrames
 		gl.ActiveTexture(gl.TEXTURE0)
 		gl.BindTexture(gl.TEXTURE_2D, texture)
+		//drawVideo(texture, chFrames)
 
 		gl.DrawArrays(gl.TRIANGLES, 0, 6*2*3)
 
@@ -144,11 +149,13 @@ func newProgram(vertexShaderSource, fragmentShaderSource string) (uint32, error)
 	if err != nil {
 		return 0, err
 	}
+	checkOpenGLError()
 
 	fragmentShader, err := compileShader(fragmentShaderSource, gl.FRAGMENT_SHADER)
 	if err != nil {
 		return 0, err
 	}
+	checkOpenGLError()
 
 	program := gl.CreateProgram()
 
@@ -167,6 +174,8 @@ func newProgram(vertexShaderSource, fragmentShaderSource string) (uint32, error)
 
 		return 0, fmt.Errorf("failed to link program: %v", log)
 	}
+	shaderLog(vertexShader)
+	shaderLog(fragmentShader)
 
 	gl.DeleteShader(vertexShader)
 	gl.DeleteShader(fragmentShader)
@@ -197,7 +206,64 @@ func compileShader(source string, shaderType uint32) (uint32, error) {
 	return shader, nil
 }
 
-func newTexture(file string) (uint32, error) {
+func newVideoTexture(file string) (uint32, chan *player.Frame, error) {
+	chFrames := make(chan *player.Frame, 100)
+	go playVideo(file, chFrames)
+
+	// load first frame in feature
+	for i := 0; i < 1000; i++ {
+		_ = <-chFrames
+	}
+	firstFrame := <-chFrames
+	var texture uint32
+	gl.GenTextures(1, &texture)
+	gl.ActiveTexture(gl.TEXTURE0)
+	gl.BindTexture(gl.TEXTURE_2D, texture)
+	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
+	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
+	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
+	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+	gl.TexImage2D(
+		gl.TEXTURE_2D,
+		0,
+		gl.RGB,
+		firstFrame.Width,
+		firstFrame.Height,
+		0,
+		gl.RGB,
+		gl.UNSIGNED_BYTE,
+		gl.Ptr(firstFrame.Data[0]))
+	return 0, chFrames, nil
+}
+
+func drawVideo(texture uint32, chFrames chan *player.Frame) {
+	gl.ActiveTexture(gl.TEXTURE0)
+	gl.BindTexture(gl.TEXTURE_2D, texture)
+	nextFrame := <-chFrames
+	gl.TexImage2D(
+		gl.TEXTURE_2D,
+		0,
+		gl.RGB,
+		nextFrame.Width,
+		nextFrame.Height,
+		0,
+		gl.RGB,
+		gl.UNSIGNED_BYTE,
+		gl.Ptr(nextFrame.Data[0]))
+}
+
+func playVideo(inputfile string, frames chan<- *player.Frame) {
+	ply, _ := player.Open(inputfile, &player.Options{Loop: true})
+	ply.SetScale(width, height)
+	ply.Play()
+
+	ply.PreFrame(func(frame *player.Frame) {
+		frames <- frame
+	})
+	ply.Wait()
+}
+
+func newImageTexture(file string) (uint32, error) {
 	dir, err := os.Getwd()
 	if err != nil {
 		return 0, err
@@ -236,7 +302,6 @@ func newTexture(file string) (uint32, error) {
 		gl.RGBA,
 		gl.UNSIGNED_BYTE,
 		gl.Ptr(rgba.Pix))
-
 	return texture, nil
 }
 
@@ -325,7 +390,7 @@ var cubeVertices = []float32{
 
 // Set the working directory to the root of Go package, so that its assets can be accessed.
 func init() {
-	dir, err := importPathToDir("github.com/go-gl/example/gl41core-cube")
+	dir, err := importPathToDir("github.com/jtestard/tinygo-webrtc/corecube")
 	if err != nil {
 		log.Fatalln("Unable to find Go package in your GOPATH, it's needed to load assets:", err)
 	}
