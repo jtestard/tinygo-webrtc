@@ -17,8 +17,6 @@ const (
 )
 
 var (
-	vidTexID          uint32
-	picTexID          uint32
 	rectangleVertices = []float32{
 		-1, -1, 0, // A
 		-1, 1, 0, // B
@@ -42,19 +40,14 @@ func main() {
 
 	window := initGlfw()
 	defer glfw.Terminate()
-	program := initOpenGL()
-
-	//chFrames := make(chan *player.Frame, 100)
-	//go playVideo("output.ivf", chFrames)
-	//
-	//for !window.ShouldClose() {
-	//	drawVideo(<-chFrames, window, program)
-	//}
-
+	drawer, err := NewDrawer("profile.png")
+	checkNoError(err)
+	program := initOpenGL(drawer)
 	vao := makeVao(rectangleVertices, rectangleTexCoords)
-	checkNoError(newImageTexture("profile.png"))
+	err = drawer.LoadTexture()
+	checkNoError(err)
 	for !window.ShouldClose() {
-		drawScene(vao, window, program)
+		drawer.DrawScene(vao, window, program)
 	}
 }
 
@@ -62,19 +55,6 @@ func checkNoError(err error) {
 	if err != nil {
 		panic(fmt.Sprintf("%v", errors.WithStack(err)))
 	}
-}
-
-func drawScene(vao uint32, window *glfw.Window, program uint32) {
-	gl.Clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
-	gl.UseProgram(program)
-
-	gl.ActiveTexture(gl.TEXTURE0)
-	gl.BindTexture(gl.TEXTURE_2D, picTexID)
-	gl.BindVertexArray(vao)
-	gl.DrawArrays(gl.TRIANGLES, 0, int32(len(rectangleVertices)/3))
-
-	glfw.PollEvents()
-	window.SwapBuffers()
 }
 
 // initGlfw initializes glfw and returns a Window to use.
@@ -89,35 +69,21 @@ func initGlfw() *glfw.Window {
 	glfw.WindowHint(glfw.OpenGLForwardCompatible, glfw.True)
 
 	window, err := glfw.CreateWindow(width, height, "Play Video", nil, nil)
-	if err != nil {
-		panic(err)
-	}
+	checkNoError(err)
 	window.MakeContextCurrent()
 
 	return window
 }
 
 // initOpenGL initializes OpenGL and returns an intiialized program.
-func initOpenGL() uint32 {
-	if err := gl.Init(); err != nil {
-		panic(err)
-	}
+func initOpenGL(drawer Drawer) uint32 {
+	err := gl.Init()
+	checkNoError(err)
 	version := gl.GoStr(gl.GetString(gl.VERSION))
 	log.Println("OpenGL version", version)
 
 	prog := gl.CreateProgram()
-
-	vertexShader, err := compileShader(vertexShaderSource, gl.VERTEX_SHADER)
-	if err != nil {
-		panic(err)
-	}
-
-	fragmentShader, err := compileShader(fragmentShaderSource, gl.FRAGMENT_SHADER)
-	if err != nil {
-		panic(err)
-	}
-	gl.AttachShader(prog, vertexShader)
-	gl.AttachShader(prog, fragmentShader)
+	drawer.LoadProgram(prog)
 	gl.LinkProgram(prog)
 	return prog
 }
