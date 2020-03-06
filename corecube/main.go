@@ -25,6 +25,11 @@ import (
 const width = 800
 const height = 600
 
+var (
+	vertexShaderI   uint32
+	fragmentShaderI uint32
+)
+
 func init() {
 	// GLFW event handling must run on the main OS thread
 	runtime.LockOSThread()
@@ -81,6 +86,7 @@ func main() {
 	gl.BindFragDataLocation(program, 0, gl.Str("outputColor\x00"))
 
 	// Load the texture
+	var chFrames chan *player.Frame
 	texture, err := newImageTexture("profile.png")
 	// texture, chFrames, err := newVideoTexture("output.ivf")
 	if err != nil {
@@ -131,7 +137,7 @@ func main() {
 
 		gl.BindVertexArray(vao)
 
-		// _ = chFrames
+		_ = chFrames
 		gl.ActiveTexture(gl.TEXTURE0)
 		gl.BindTexture(gl.TEXTURE_2D, texture)
 		//drawVideo(texture, chFrames)
@@ -145,13 +151,14 @@ func main() {
 }
 
 func newProgram(vertexShaderSource, fragmentShaderSource string) (uint32, error) {
-	vertexShader, err := compileShader(vertexShaderSource, gl.VERTEX_SHADER)
+	var err error
+	vertexShaderI, err = compileShader(vertexShaderSource, gl.VERTEX_SHADER)
 	if err != nil {
 		return 0, err
 	}
 	checkOpenGLError()
 
-	fragmentShader, err := compileShader(fragmentShaderSource, gl.FRAGMENT_SHADER)
+	fragmentShaderI, err = compileShader(fragmentShaderSource, gl.FRAGMENT_SHADER)
 	if err != nil {
 		return 0, err
 	}
@@ -159,8 +166,8 @@ func newProgram(vertexShaderSource, fragmentShaderSource string) (uint32, error)
 
 	program := gl.CreateProgram()
 
-	gl.AttachShader(program, vertexShader)
-	gl.AttachShader(program, fragmentShader)
+	gl.AttachShader(program, vertexShaderI)
+	gl.AttachShader(program, fragmentShaderI)
 	gl.LinkProgram(program)
 
 	var status int32
@@ -174,11 +181,11 @@ func newProgram(vertexShaderSource, fragmentShaderSource string) (uint32, error)
 
 		return 0, fmt.Errorf("failed to link program: %v", log)
 	}
-	shaderLog(vertexShader)
-	shaderLog(fragmentShader)
+	shaderLog(vertexShaderI)
+	shaderLog(fragmentShaderI)
 
-	gl.DeleteShader(vertexShader)
-	gl.DeleteShader(fragmentShader)
+	gl.DeleteShader(vertexShaderI)
+	gl.DeleteShader(fragmentShaderI)
 
 	return program, nil
 }
@@ -211,9 +218,9 @@ func newVideoTexture(file string) (uint32, chan *player.Frame, error) {
 	go playVideo(file, chFrames)
 
 	// load first frame in feature
-	for i := 0; i < 1000; i++ {
-		_ = <-chFrames
-	}
+	//for i := 0; i < 1000; i++ {
+	//	_ = <-chFrames
+	//}
 	firstFrame := <-chFrames
 	var texture uint32
 	gl.GenTextures(1, &texture)
@@ -230,9 +237,10 @@ func newVideoTexture(file string) (uint32, chan *player.Frame, error) {
 		firstFrame.Width,
 		firstFrame.Height,
 		0,
-		gl.RGB,
+		gl.SRGB,
 		gl.UNSIGNED_BYTE,
 		gl.Ptr(firstFrame.Data[0]))
+	shaderLog(fragmentShaderI)
 	return 0, chFrames, nil
 }
 

@@ -1,12 +1,14 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"runtime"
 
 	"github.com/go-gl/gl/v4.1-core/gl"
 	"github.com/go-gl/glfw/v3.2/glfw"
-	"github.com/hysios/go-ffmpeg-player/player"
+	// "github.com/hysios/go-ffmpeg-player/player"
+	"github.com/pkg/errors"
 )
 
 const (
@@ -15,21 +17,23 @@ const (
 )
 
 var (
-	//triangle = []float32{
-	//	0, 0.5, 0,
-	//	-0.5, -0.5, 0,
-	//	0.5, -0.5, 0,
-	//}
-	showVideo = true
-	vidTexID  uint32
-	picTexID  uint32
-	rectangle = []float32{
-		-1, -1, 0,
-		-1, 1, 0,
-		1, -1, 0, // left triangle
-		-1, 1, 0,
-		1, -1, 0,
-		1, 1, 0, // right triangle
+	vidTexID          uint32
+	picTexID          uint32
+	rectangleVertices = []float32{
+		-1, -1, 0, // A
+		-1, 1, 0, // B
+		1, -1, 0, // C left triangle
+		-1, 1, 0, // B
+		1, -1, 0, // C
+		1, 1, 0, // D right triangle
+	}
+	rectangleTexCoords = []float32{
+		0, 0, // A
+		0, 1, // B
+		1, 0, // C
+		0, 1, // B
+		1, 0, // C
+		1, 1, // D
 	}
 )
 
@@ -40,27 +44,34 @@ func main() {
 	defer glfw.Terminate()
 	program := initOpenGL()
 
-	if showVideo {
-		chFrames := make(chan *player.Frame, 100)
-		go playVideo("output.ivf", chFrames)
+	//chFrames := make(chan *player.Frame, 100)
+	//go playVideo("output.ivf", chFrames)
+	//
+	//for !window.ShouldClose() {
+	//	drawVideo(<-chFrames, window, program)
+	//}
 
-		for !window.ShouldClose() {
-			drawVideo(<-chFrames, window, program)
-		}
-	} else {
-		vao := makeVao(rectangle)
-		for !window.ShouldClose() {
-			draw(vao, window, program)
-		}
+	vao := makeVao(rectangleVertices, rectangleTexCoords)
+	checkNoError(newImageTexture("profile.png"))
+	for !window.ShouldClose() {
+		drawScene(vao, window, program)
 	}
 }
 
-func draw(vao uint32, window *glfw.Window, program uint32) {
+func checkNoError(err error) {
+	if err != nil {
+		panic(fmt.Sprintf("%v", errors.WithStack(err)))
+	}
+}
+
+func drawScene(vao uint32, window *glfw.Window, program uint32) {
 	gl.Clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
 	gl.UseProgram(program)
 
+	gl.ActiveTexture(gl.TEXTURE0)
+	gl.BindTexture(gl.TEXTURE_2D, picTexID)
 	gl.BindVertexArray(vao)
-	gl.DrawArrays(gl.TRIANGLES, 0, int32(len(rectangle)/3))
+	gl.DrawArrays(gl.TRIANGLES, 0, int32(len(rectangleVertices)/3))
 
 	glfw.PollEvents()
 	window.SwapBuffers()
@@ -96,41 +107,49 @@ func initOpenGL() uint32 {
 
 	prog := gl.CreateProgram()
 
-	//gl.GenTextures(1, &picTexID)
-	//gl.BindTexture(gl.TEXTURE_2D, picTexID)
-	//gl.TexParameteri(gl.GLTex)
-	if showVideo {
-		setVideoTexture()
-	} else {
-		vertexShader, err := compileShader(vertexShaderSource, gl.VERTEX_SHADER)
-		if err != nil {
-			panic(err)
-		}
-
-		fragmentShader, err := compileShader(fragmentShaderSource, gl.FRAGMENT_SHADER)
-		if err != nil {
-			panic(err)
-		}
-		gl.AttachShader(prog, vertexShader)
-		gl.AttachShader(prog, fragmentShader)
+	vertexShader, err := compileShader(vertexShaderSource, gl.VERTEX_SHADER)
+	if err != nil {
+		panic(err)
 	}
+
+	fragmentShader, err := compileShader(fragmentShaderSource, gl.FRAGMENT_SHADER)
+	if err != nil {
+		panic(err)
+	}
+	gl.AttachShader(prog, vertexShader)
+	gl.AttachShader(prog, fragmentShader)
 	gl.LinkProgram(prog)
 	return prog
 }
 
 // makeVao initializes and returns a vertex array from the points provided.
-func makeVao(points []float32) uint32 {
-	var vbo uint32
-	gl.GenBuffers(1, &vbo)
-	gl.BindBuffer(gl.ARRAY_BUFFER, vbo)
-	gl.BufferData(gl.ARRAY_BUFFER, 4*len(points), gl.Ptr(points), gl.STATIC_DRAW)
+func makeVao(vertices []float32, textureCoords []float32) uint32 {
+	vbos := make([]uint32, 2)
+	// vertices
+	gl.GenBuffers(1, &vbos[0])
+	gl.BindBuffer(gl.ARRAY_BUFFER, vbos[0])
+	gl.BufferData(gl.ARRAY_BUFFER, 4*len(vertices), gl.Ptr(vertices), gl.STATIC_DRAW)
 
+	// texture coords
+	texInvertY(textureCoords)
+	gl.GenBuffers(1, &vbos[1])
+	gl.BindBuffer(gl.ARRAY_BUFFER, vbos[1])
+	gl.BufferData(gl.ARRAY_BUFFER, 4*len(textureCoords), gl.Ptr(textureCoords), gl.STATIC_DRAW)
+
+	// create vao
 	var vao uint32
 	gl.GenVertexArrays(1, &vao)
 	gl.BindVertexArray(vao)
-	gl.EnableVertexAttribArray(0)
-	gl.BindBuffer(gl.ARRAY_BUFFER, vbo)
+
+	// bind vertices
+	gl.BindBuffer(gl.ARRAY_BUFFER, vbos[0])
 	gl.VertexAttribPointer(0, 3, gl.FLOAT, false, 0, nil)
+	gl.EnableVertexAttribArray(0)
+
+	// bind textures
+	gl.BindBuffer(gl.ARRAY_BUFFER, vbos[1])
+	gl.VertexAttribPointer(1, 2, gl.FLOAT, false, 0, nil)
+	gl.EnableVertexAttribArray(1)
 
 	return vao
 }

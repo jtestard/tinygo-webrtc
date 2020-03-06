@@ -14,8 +14,9 @@ func shaderLog(shader uint32) string {
 		msg = make([]uint8, length)
 		gl.GetShaderInfoLog(shader, length, &chWritten, &msg[0])
 		fmt.Printf("shader log: %s\n", goString(msg))
+		return goString(msg)
 	}
-	return goString(msg)
+	return ""
 }
 
 func programLog(program uint32) string {
@@ -26,8 +27,9 @@ func programLog(program uint32) string {
 		msg = make([]uint8, length)
 		gl.GetProgramInfoLog(program, length, &chWritten, &msg[0])
 		fmt.Printf("program log: %s\n", goString(msg))
+		return goString(msg)
 	}
-	return goString(msg)
+	return ""
 }
 
 func goString(buf []uint8) string {
@@ -36,7 +38,8 @@ func goString(buf []uint8) string {
 			return string(buf[:i])
 		}
 	}
-	panic("buf is not NUL-terminated")
+
+	panic(fmt.Sprintf("buf is not NUL-terminated: this is what we got: %X", buf))
 }
 
 func checkOpenGLError() {

@@ -44,11 +44,11 @@ func drawVideo( /*vao uint32,*/ frame *player.Frame, window *glfw.Window, prog u
 	gl.Uniform2f(gl.GetUniformLocation(prog, gl.Str("TextureSize\x00")), float32(frame.Width), float32(frame.Height))
 	gl.Uniform2f(gl.GetUniformLocation(prog, gl.Str("InputSize\x00")), float32(frame.Width), float32(frame.Height))
 	gl.TexSubImage2D(gl.TEXTURE_2D, 0, 0, 0, int32(frame.Width), int32(frame.Height), gl.RGB, gl.UNSIGNED_BYTE, nil)
-	gl.TexImage2D(gl.TEXTURE_2D, 0, gl.RGB, 2)
+	// gl.TexImage2D(gl.TEXTURE_2D, 0, gl.RGB, 2)
 
 	//// draw image
 	//gl.BindVertexArray(vao)
-	//gl.DrawArrays(gl.TRIANGLES, 0, int32(len(rectangle)/3))
+	//gl.DrawArrays(gl.TRIANGLES, 0, int32(len(rectangleVertices)/3))
 
 	glfw.PollEvents()
 	window.SwapBuffers()
