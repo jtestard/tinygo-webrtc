@@ -6,8 +6,7 @@ import (
 	"runtime"
 
 	"github.com/go-gl/gl/v4.1-core/gl"
-	"github.com/go-gl/glfw/v3.2/glfw"
-	// "github.com/hysios/go-ffmpeg-player/player"
+	"github.com/go-gl/glfw/v3.3/glfw"
 	"github.com/pkg/errors"
 )
 
@@ -41,10 +40,11 @@ func main() {
 	window := initGlfw()
 	defer glfw.Terminate()
 	drawer, err := NewDrawer("profile.png")
+	// drawer, err := NewDrawer("output.ivf")
 	checkNoError(err)
 	program := initOpenGL(drawer)
 	vao := makeVao(rectangleVertices, rectangleTexCoords)
-	err = drawer.LoadTexture()
+	err = drawer.LoadTexture(program)
 	checkNoError(err)
 	for !window.ShouldClose() {
 		drawer.DrawScene(vao, window, program)
@@ -83,7 +83,7 @@ func initOpenGL(drawer Drawer) uint32 {
 	log.Println("OpenGL version", version)
 
 	prog := gl.CreateProgram()
-	drawer.LoadProgram(prog)
+	checkNoError(drawer.LoadProgram(prog))
 	gl.LinkProgram(prog)
 	return prog
 }

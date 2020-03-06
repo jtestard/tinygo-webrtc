@@ -2,12 +2,12 @@ package main
 
 import (
 	"fmt"
-	"github.com/go-gl/glfw/v3.2/glfw"
+	"github.com/go-gl/glfw/v3.3/glfw"
 	"path/filepath"
 )
 
 type Drawer interface {
-	LoadTexture() error
+	LoadTexture(prog uint32) error
 	LoadProgram(prog uint32) error
 	DrawScene(vao uint32, window *glfw.Window, program uint32)
 }
@@ -18,10 +18,9 @@ func NewDrawer(file string) (Drawer, error) {
 	case ".png":
 		fallthrough
 	case ".jpeg":
-		imgDrawer := &ImgDrawer{file: file}
-		return imgDrawer, nil
+		return &ImgDrawer{file: file}, nil
 	case ".ivf":
-		return nil, fmt.Errorf("cannot load file with extension: %s", ext)
+		return &VideoDrawer{file: file}, nil
 	default:
 		return nil, fmt.Errorf("cannot load file with extension: %s", ext)
 	}

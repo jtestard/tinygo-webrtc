@@ -2,7 +2,7 @@ package main
 
 import (
 	"fmt"
-	"github.com/go-gl/glfw/v3.2/glfw"
+	"github.com/go-gl/glfw/v3.3/glfw"
 	"image"
 	"image/draw"
 	_ "image/png"
@@ -39,7 +39,7 @@ type ImgDrawer struct {
 	file  string
 }
 
-func (i ImgDrawer) LoadTexture() error {
+func (i *ImgDrawer) LoadTexture(_ uint32) error {
 	imgFile, err := os.Open(i.file)
 	if err != nil {
 		return fmt.Errorf("texture %q not found on disk: %v", i.file, err)
@@ -75,7 +75,7 @@ func (i ImgDrawer) LoadTexture() error {
 	return nil
 }
 
-func (i ImgDrawer) LoadProgram(prog uint32) error {
+func (i *ImgDrawer) LoadProgram(prog uint32) error {
 	vertexShader, err := compileShader(imgVertexShaderSource, gl.VERTEX_SHADER)
 	if err != nil {
 		return err
@@ -90,7 +90,7 @@ func (i ImgDrawer) LoadProgram(prog uint32) error {
 	return nil
 }
 
-func (i ImgDrawer) DrawScene(vao uint32, window *glfw.Window, program uint32) {
+func (i *ImgDrawer) DrawScene(vao uint32, window *glfw.Window, program uint32) {
 	gl.Clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
 	gl.UseProgram(program)
 

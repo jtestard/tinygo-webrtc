@@ -2,6 +2,7 @@ package main
 
 import (
 	"github.com/go-gl/gl/v4.1-core/gl"
+	"github.com/go-gl/glfw/v3.3/glfw"
 	"github.com/hysios/go-ffmpeg-player/player"
 )
 
@@ -19,35 +20,63 @@ const (
 
 	videoFragmentShaderSource = `
    #version 410
-   in vec2 tc;
+   in vec2 tcY;
    out vec4 frag_colour;
-   uniform sampler2D samp;
+   uniform sampler2D sampY;
+   uniform sampler2D sampU;
+   uniform sampler2D sampV;
    void main() {
        frag_colour = texture(samp, tc);
    }
 ` + "\x00"
 )
 
-func playVideo(inputfile string, frames chan<- *player.Frame) {
-	ply, _ := player.Open(inputfile, &player.Options{Loop: true})
-	ply.SetScale(width, height)
-	ply.Play()
-
-	ply.PreFrame(func(frame *player.Frame) {
-		frames <- frame
-	})
-	ply.Wait()
+type VideoDrawer struct {
+	texID    uint32
+	file     string
+	chFrames chan *player.Frame
 }
 
-func newVideoTexture(file string) (uint32, chan *player.Frame, error) {
-	chFrames := make(chan *player.Frame, 100)
-	go playVideo(file, chFrames)
+func (v *VideoDrawer) LoadTexture(prog uint32) error {
+	v.chFrames = make(chan *player.Frame, 100)
+	go v.playVideo()
 
-	firstFrame := <-chFrames
-	var texture uint32
-	gl.GenTextures(1, &texture)
+	gl.GenTextures(1, &v.texID)
+	v.loadNextTexture(prog)
+	return nil
+}
+
+func fromGoString(msg string) *uint8 {
+	out := make([]uint8, len(msg))
+	for i, b := range msg {
+		out[i] = uint8(b)
+	}
+	return &out[0]
+}
+
+func (v *VideoDrawer) loadNextTexture(prog uint32) {
+	frame := <-v.chFrames
+
+	gl.ActiveTexture(gl.TEXTURE1)
+	i := gl.GetUniformLocation(prog, fromGoString("sampU")) // Get reference to variable sampU from program
+	gl.Uniform1i(i, 1)                                      // Binds SampU variable from GLSL to texture unit
+	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
+	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
+	gl.BindTexture(gl.TEXTURE_2D, 1)
+	gl.TexImage2D(
+		gl.TEXTURE_2D,
+		0,
+		gl.RGB,
+		frame.Width,
+		frame.Height,
+		0,
+		gl.SRGB,
+		gl.UNSIGNED_BYTE,
+		gl.Ptr(frame.Data[1]))
+
+	// 1
 	gl.ActiveTexture(gl.TEXTURE0)
-	gl.BindTexture(gl.TEXTURE_2D, texture)
+	gl.BindTexture(gl.TEXTURE_2D, v.texID)
 	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
 	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
 	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
@@ -56,21 +85,49 @@ func newVideoTexture(file string) (uint32, chan *player.Frame, error) {
 		gl.TEXTURE_2D,
 		0,
 		gl.RGB,
-		firstFrame.Width,
-		firstFrame.Height,
+		frame.Width,
+		frame.Height,
 		0,
 		gl.SRGB,
 		gl.UNSIGNED_BYTE,
-		gl.Ptr(firstFrame.Data[0]))
-	return 0, chFrames, nil
+		gl.Ptr(frame.Data[0]))
 }
 
-func setupVideoShaders(prog uint32) {
+func (v *VideoDrawer) LoadProgram(prog uint32) error {
 	vertexShader, err := compileShader(videoVertexShaderSource, gl.VERTEX_SHADER)
-	checkNoError(err)
+	if err != nil {
+		return err
+	}
 
 	fragmentShader, err := compileShader(videoFragmentShaderSource, gl.FRAGMENT_SHADER)
-	checkNoError(err)
+	if err != nil {
+		return err
+	}
 	gl.AttachShader(prog, vertexShader)
 	gl.AttachShader(prog, fragmentShader)
+	return nil
+}
+
+func (v *VideoDrawer) DrawScene(vao uint32, window *glfw.Window, program uint32) {
+	gl.Clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
+	gl.UseProgram(program)
+
+	gl.ActiveTexture(gl.TEXTURE0)
+	gl.BindTexture(gl.TEXTURE_2D, v.texID)
+	gl.BindVertexArray(vao)
+	gl.DrawArrays(gl.TRIANGLES, 0, int32(len(rectangleVertices)/3))
+
+	glfw.PollEvents()
+	window.SwapBuffers()
+}
+
+func (v *VideoDrawer) playVideo() {
+	ply, _ := player.Open(v.file, &player.Options{Loop: true})
+	ply.SetScale(width, height)
+	ply.Play()
+
+	ply.PreFrame(func(frame *player.Frame) {
+		v.chFrames <- frame
+	})
+	ply.Wait()
 }
